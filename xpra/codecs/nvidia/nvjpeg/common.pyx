@@ -9,7 +9,7 @@ cdef extern from "library_types.h":
         MINOR_VERSION
         PATCH_LEVEL
 
-from xpra.codecs.nvjpeg.nvjpeg cimport (
+from xpra.codecs.nvidia.nvjpeg.nvjpeg cimport (
     NVJPEG_VER_MAJOR, NVJPEG_VER_MINOR, NVJPEG_VER_PATCH, NVJPEG_VER_BUILD,
     #ERR_STR:
     NVJPEG_STATUS_SUCCESS,

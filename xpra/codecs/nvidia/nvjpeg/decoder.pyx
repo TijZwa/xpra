@@ -9,7 +9,7 @@ from libc.string cimport memset #pylint: disable=syntax-error
 from libc.stdint cimport uintptr_t
 from xpra.buffers.membuf cimport getbuf, MemBuf #pylint: disable=syntax-error
 from xpra.buffers.membuf cimport buffer_context
-from xpra.codecs.nvjpeg.nvjpeg cimport (
+from xpra.codecs.nvidia.nvjpeg.nvjpeg cimport (
     NVJPEG_OUTPUT_RGBI, NVJPEG_OUTPUT_BGRI, NVJPEG_OUTPUT_Y,
     NV_ENC_INPUT_PTR, NV_ENC_OUTPUT_PTR, NV_ENC_REGISTERED_PTR,
     nvjpegStatus_t, nvjpegChromaSubsampling_t, nvjpegOutputFormat_t,
@@ -20,12 +20,12 @@ from xpra.codecs.nvjpeg.nvjpeg cimport (
     nvjpegJpegStateCreate, nvjpegJpegStateDestroy,
     nvjpegGetImageInfo,
     )
-from xpra.codecs.nvjpeg.common import (
+from xpra.codecs.nvidia.nvjpeg.common import (
     get_version,
     errcheck, NVJPEG_Exception,
     ERR_STR, CSS_STR,
     )
-from xpra.codecs.cuda_common.cuda_context import select_device, cuda_device_context
+from xpra.codecs.nvidia.cuda_context import select_device, cuda_device_context
 from xpra.codecs.image_wrapper import ImageWrapper
 from xpra.log import Logger
 log = Logger("encoder", "nvjpeg")

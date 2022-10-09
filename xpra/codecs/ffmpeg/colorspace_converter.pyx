@@ -11,8 +11,8 @@ log = Logger("csc", "swscale")
 from xpra.util import typedict
 from xpra.codecs.codec_constants import csc_spec
 from xpra.codecs.image_wrapper import ImageWrapper
-from xpra.codecs.libav_common.av_log cimport override_logger, restore_logger #@UnresolvedImport pylint: disable=syntax-error
-from xpra.codecs.libav_common.av_log import SilenceAVWarningsContext
+from xpra.codecs.ffmpeg.av_log cimport override_logger, restore_logger #@UnresolvedImport pylint: disable=syntax-error
+from xpra.codecs.ffmpeg.av_log import SilenceAVWarningsContext
 from xpra.buffers.membuf cimport padbuf, MemBuf
 
 from libc.string cimport memset #pylint: disable=syntax-error

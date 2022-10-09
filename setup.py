@@ -31,6 +31,13 @@ from xpra.os_util import (
     is_CentOS, is_AlmaLinux, is_RockyLinux, is_RedHat, is_openSUSE, is_OracleLinux,
     )
 
+if BITS!=64:
+    print(f"Warning: {BITS}-bit architecture, only 64-bits are officially supported")
+    from time import sleep
+    for _ in range(5):
+        sleep(1)
+        print(".")
+
 
 #*******************************************************************************
 print(" ".join(sys.argv))
@@ -122,12 +129,13 @@ def pkg_config_version(req_version, pkgname):
     #ie: 0.163.x
     if out.endswith(".x"):
         out = out[:-2]
+    # pylint: disable=import-outside-toplevel
     try:
         from packaging.version import parse
         return parse(out)>=parse(req_version)
     except ImportError:
         from distutils.version import LooseVersion
-    return LooseVersion(out)>=LooseVersion(req_version)
+        return LooseVersion(out)>=LooseVersion(req_version)
 
 
 DEFAULT = True
@@ -137,7 +145,7 @@ if "--minimal" in sys.argv:
 skip_build = "--skip-build" in sys.argv
 ARCH = get_status_output(["uname", "-m"])[1]
 ARM = ARCH.startswith("arm") or ARCH.startswith("aarch")
-print("ARCH=%s" % (ARCH,))
+print("ARCH={ARCH}")
 
 INCLUDE_DIRS = os.environ.get("INCLUDE_DIRS", os.path.join(sys.prefix, "include")).split(os.pathsep)
 CPP = os.environ.get("CPP", "cpp")
@@ -206,7 +214,8 @@ webp_ENABLED            = DEFAULT and pkg_config_version("0.5", "libwebp")
 jpeg_encoder_ENABLED    = DEFAULT and pkg_config_version("1.2", "libturbojpeg")
 jpeg_decoder_ENABLED    = DEFAULT and pkg_config_version("1.4", "libturbojpeg")
 avif_ENABLED            = DEFAULT and pkg_config_version("0.9", "libavif") and not OSX
-vpx_ENABLED             = DEFAULT and pkg_config_version("1.4", "vpx")
+vpx_ENABLED             = DEFAULT and pkg_config_version("1.8", "vpx") and BITS==64
+vpl_ENABLED             = False     #DEFAULT and pkg_config_version("2.7", "vpl")
 enc_ffmpeg_ENABLED      = DEFAULT and BITS==64 and pkg_config_version("58.18", "libavcodec")
 #opencv currently broken on 32-bit windows (crashes on load):
 webcam_ENABLED          = DEFAULT and not OSX and not WIN32
@@ -246,7 +255,7 @@ CODEC_SWITCHES = [
     "enc_x264", "enc_x265", "enc_ffmpeg", "nvenc",
     "cuda_kernels", "cuda_rebuild",
     "nvfbc",
-    "vpx", "webp", "pillow",
+    "vpx", "vpl", "webp", "pillow",
     "spng_decoder", "spng_encoder",
     "jpeg_encoder", "jpeg_decoder",
     "nvjpeg_encoder", "nvjpeg_decoder", "avif", "argb",
@@ -308,7 +317,7 @@ filtered_args = []
 for arg in sys.argv:
     matched = False
     for x in ("rpath", "ssl-cert", "ssl-key", "install", "share-xpra"):
-        varg = "--%s=" % x
+        varg = f"--{x}="
         if arg.startswith(varg):
             value = arg[len(varg):]
             globals()[x.replace("-", "_")] = value
@@ -319,8 +328,8 @@ for arg in sys.argv:
     if matched:
         continue
     for x in SWITCHES:
-        with_str = "--with-%s" % x
-        without_str = "--without-%s" % x
+        with_str = f"--with-{x}"
+        without_str = f"--without-{x}"
         var_names = SWITCH_ALIAS.get(x, [x])
         if arg.startswith(with_str+"="):
             for var in var_names:
@@ -352,7 +361,7 @@ if "clean" not in sys.argv and "sdist" not in sys.argv:
     if not cython_ENABLED:
         enc_ffmpeg_ENABLED = enc_x264_ENABLED = enc_x265_ENABLED = nvenc_ENABLED = False
         csc_swscale_ENABLED = csc_libyuv_ENABLED = csc_cython_ENABLED = False
-        vpx_ENABLED = nvfbc_ENABLED = dec_avcodec2_ENABLED = False
+        vpx_ENABLED = nvfbc_ENABLED = dec_avcodec2_ENABLED = vpl_ENABLED = False
         spng_decoder_ENABLED = spng_encoder_ENABLED = False
         webp_ENABLED = jpeg_encoder_ENABLED = jpeg_decoder_ENABLED = False
         server_ENABLED = client_ENABLED = shadow_ENABLED = False
@@ -541,7 +550,7 @@ def do_add_modules(op, *mods):
             x = x.replace("/", ".") #.replace("\\", ".")
         pathname = os.path.sep.join(x.split("."))
         #is this a file module?
-        f = "%s.py" % pathname
+        f = f"{pathname}.py"
         if os.path.exists(f) and os.path.isfile(f):
             op(x)
         if os.path.exists(pathname) and os.path.isdir(pathname):
@@ -552,7 +561,7 @@ def do_add_modules(op, *mods):
                 if f.endswith(".py") and not f.startswith("Copy ")<0:
                     fname = os.path.join(pathname, f)
                     if os.path.isfile(fname):
-                        modname = "%s.%s" % (x, f.replace(".py", ""))
+                        modname = f"{x}."+f.replace(".py", "")
                         op(modname)
 
 def toggle_packages(enabled, *module_names):
@@ -639,9 +648,16 @@ def checkdirs(*dirs):
             raise Exception("cannot find a directory which is required for building: '%s'" % d)
 
 
+def CC_is_clang():
+    cc = os.environ.get("CC", "gcc")
+    return cc.find("clang")>=0
+
 GCC_VERSION = ()
 def get_gcc_version():
     global GCC_VERSION
+    if CC_is_clang():
+        GCC_VERSION = (0, )
+        return GCC_VERSION
     if not GCC_VERSION:
         cc = os.environ.get("CC", "gcc")
         r, _, err = get_status_output([cc, "-v"])
@@ -742,15 +758,15 @@ def exec_pkgconfig(*pkgs_options, **ekw):
             }.items():
             pkg_config_cmd = ["pkg-config", pc_arg] + list(pkgs_options)
             if verbose_ENABLED:
-                print("pkg_config_cmd=%s" % (pkg_config_cmd, ))
+                print(f"pkg_config_cmd={pkg_config_cmd}")
             r, pkg_config_out, err = get_status_output(pkg_config_cmd)
             if r!=0:
                 sys.exit("ERROR: call to '%s' failed (err=%s)" % (" ".join(pkg_config_cmd), err))
             if verbose_ENABLED:
-                print("pkg-config output: %s" % (pkg_config_out, ))
+                print(f"pkg-config output: {pkg_config_out}")
             add_tokens(pkg_config_out, add_to)
             if verbose_ENABLED:
-                print("pkg-config kw=%s" % (kw, ))
+                print(f"pkg-config kw={kw}")
     if warn_ENABLED:
         addcflags("-Wall")
         addldflags("-Wall")
@@ -792,13 +808,13 @@ def exec_pkgconfig(*pkgs_options, **ekw):
             addldflags("-fsanitize=address")
     if rpath and kw.get("libraries"):
         insert_into_keywords(kw, "library_dirs", rpath)
-        insert_into_keywords(kw, "extra_link_args", "-Wl,-rpath=%s" % rpath)
+        insert_into_keywords(kw, "extra_link_args", f"-Wl,-rpath={rpath}")
     CFLAGS = os.environ.get("CFLAGS")
     LDFLAGS = os.environ.get("LDFLAGS")
     #win32 remove double "-march=x86-64 -mtune=generic -O2 -pipe -O3"?
     if verbose_ENABLED:
-        print("adding CFLAGS=%s" % (CFLAGS, ))
-        print("adding LDFLAGS=%s" % (LDFLAGS, ))
+        print(f"adding CFLAGS={CFLAGS}")
+        print(f"adding LDFLAGS={LDFLAGS}")
     add_tokens(CFLAGS, "extra_compile_args")
     add_tokens(LDFLAGS, "extra_link_args")
     #add_to_keywords(kw, 'include_dirs', '.')
@@ -876,18 +892,21 @@ def get_conf_dir(install_dir, stripbuildroot=True):
     return os.path.join(*dirs)
 
 def detect_xorg_setup(install_dir=None):
+    # pylint: disable=import-outside-toplevel
     from xpra.scripts import config
     config.debug = config.warn
     conf_dir = get_conf_dir(install_dir)
     return config.detect_xvfb_command(conf_dir, None, Xdummy_ENABLED, Xdummy_wrapper_ENABLED)
 
 def detect_xdummy_setup(install_dir=None):
+    # pylint: disable=import-outside-toplevel
     from xpra.scripts import config
     config.debug = config.warn
     conf_dir = get_conf_dir(install_dir)
     return config.detect_xdummy_command(conf_dir, None, Xdummy_wrapper_ENABLED)
 
 def build_xpra_conf(install_dir):
+    # pylint: disable=import-outside-toplevel
     #generates an actual config file from the template
     xvfb_command = detect_xorg_setup(install_dir)
     xdummy_command = detect_xdummy_setup(install_dir)
@@ -903,7 +922,7 @@ def build_xpra_conf(install_dir):
     start_env = "\n".join("start-env = %s" % x for x in DEFAULT_ENV)
     source = "\n".join("source = %s" % x for x in SOURCE)
     conf_dir = get_conf_dir(install_dir)
-    print("get_conf_dir(%s)=%s" % (install_dir, conf_dir))
+    print(f"get_conf_dir({install_dir})={conf_dir}")
     from xpra.platform.features import DEFAULT_PULSEAUDIO_CONFIGURE_COMMANDS
     from xpra.platform.paths import get_socket_dirs
     from xpra.scripts.config import (
@@ -929,9 +948,9 @@ def build_xpra_conf(install_dir):
             print("probing cups printer definitions")
             pdf = get_printer_definition("pdf")
             postscript = get_printer_definition("postscript") or DEFAULT_POSTSCRIPT_PRINTER
-            print("pdf=%s, postscript=%s" % (pdf, postscript))
+            print(f"pdf={pdf}, postscript={postscript}")
         except Exception as e:
-            print("could not probe for pdf/postscript printers: %s" % e)
+            print(f"could not probe for pdf/postscript printers: {e}")
     def pretty_cmd(cmd):
         return " ".join(cmd)
     #OSX doesn't have webcam support yet (no opencv builds on 10.5.x)
@@ -993,7 +1012,7 @@ def build_xpra_conf(install_dir):
             with open(filename, "r") as f_in:
                 template  = f_in.read()
             target_file = os.path.join(target_dir, f[:-len(".in")])
-            print("generating %s from %s" % (target_file, f))
+            print(f"generating {target_file} from {f}")
             with open(target_file, "w") as f_out:
                 config_data = template % SUBS
                 f_out.write(config_data)
@@ -1044,31 +1063,32 @@ def clean():
                    "xpra/buffers/cyxor.c",
                    "xpra/codecs/vpx/encoder.c",
                    "xpra/codecs/vpx/decoder.c",
-                   "xpra/codecs/nvenc/encoder.c",
-                   "xpra/codecs/nvfbc/fbc_capture_linux.cpp",
-                   "xpra/codecs/nvfbc/fbc_capture_win.cpp",
-                   "xpra/codecs/nvjpeg/common.c",
-                   "xpra/codecs/nvjpeg/encoder.c",
-                   "xpra/codecs/nvjpeg/decoder.c",
+                   "xpra/codecs/vpl/encoder.c",
+                   "xpra/codecs/nvidia/nvenc/encoder.c",
+                   "xpra/codecs/nvidia/nvfbc/fbc_capture_linux.cpp",
+                   "xpra/codecs/nvidia/nvfbc/fbc_capture_win.cpp",
+                   "xpra/codecs/nvidia/nvjpeg/common.c",
+                   "xpra/codecs/nvidia/nvjpeg/encoder.c",
+                   "xpra/codecs/nvidia/nvjpeg/decoder.c",
                    "xpra/codecs/avif/encoder.c",
                    "xpra/codecs/avif/decoder.c",
-                   "xpra/codecs/enc_x264/encoder.c",
-                   "xpra/codecs/enc_x265/encoder.c",
+                   "xpra/codecs/x264/encoder.c",
+                   "xpra/codecs/x265/encoder.c",
                    "xpra/codecs/spng/encoder.c",
                    "xpra/codecs/spng/decoder.c",
                    "xpra/codecs/jpeg/encoder.c",
                    "xpra/codecs/jpeg/decoder.c",
-                   "xpra/codecs/enc_ffmpeg/encoder.c",
+                   "xpra/codecs/ffmpeg/encoder.c",
+                   "xpra/codecs/ffmpeg/av_log.c",
+                   "xpra/codecs/ffmpeg/colorspace_converter.c",
+                   "xpra/codecs/ffmpeg/decoder.c",
                    "xpra/codecs/v4l2/pusher.c",
                    "xpra/codecs/v4l2/constants.pxi",
                    "xpra/codecs/evdi/capture.cpp",
                    "xpra/codecs/drm/drm.c",
-                   "xpra/codecs/libav_common/av_log.c",
                    "xpra/codecs/webp/encoder.c",
                    "xpra/codecs/webp/decoder.c",
-                   "xpra/codecs/dec_avcodec2/decoder.c",
-                   "xpra/codecs/csc_libyuv/colorspace_converter.cpp",
-                   "xpra/codecs/csc_swscale/colorspace_converter.c",
+                   "xpra/codecs/libyuv/colorspace_converter.cpp",
                    "xpra/codecs/csc_cython/colorspace_converter.c",
                    "xpra/codecs/argb/argb.c",
                    "xpra/codecs/nvapi_version.c",
@@ -1101,7 +1121,7 @@ def clean():
         filename = os.path.join(os.getcwd(), x.replace("/", os.path.sep))
         if os.path.exists(filename):
             if verbose_ENABLED:
-                print("removing Cython/build generated file: %s" % x)
+                print(f"removing Cython/build generated file: {x}")
             os.unlink(filename)
 
 if 'clean' in sys.argv or 'sdist' in sys.argv:
@@ -1224,8 +1244,8 @@ if WIN32:
             try:
                 do_add_DLLs("lib", *dll_names)
             except Exception as e:
-                print("Error: failed to add DLLs: %s" % (dll_names, ))
-                print(" %s" % e)
+                print(f"Error: failed to add DLLs: {dll_names}")
+                print(f" {e}")
                 sys.exit(1)
 
         def do_add_DLLs(prefix="lib", *dll_names):
@@ -1237,7 +1257,7 @@ if WIN32:
             if os.path.exists(gnome_include_path):
                 dirs.insert(0, gnome_include_path)
             if verbose_ENABLED:
-                print("add_DLLs: looking for %s in %s" % (dll_names, dirs))
+                print(f"add_DLLs: looking for {dll_names} in {dirs}")
             for d in dirs:
                 if not os.path.exists(d):
                     continue
@@ -1254,7 +1274,7 @@ if WIN32:
                     #ie: "libatk-1.0-0.dll" -> "atk-1.0-0"
                     nameversion = x[len(prefix):-4]
                     if verbose_ENABLED:
-                        print("checking %s: %s" % (x, nameversion))
+                        print(f"checking {x}: {nameversion}")
                     m = version_re.search(nameversion)          #look for version part of filename
                     if m:
                         dll_version = m.group(0)                #found it, ie: "-1.0-0"
@@ -1271,7 +1291,7 @@ if WIN32:
             if dll_names:
                 print("some DLLs could not be found:")
                 for x in dll_names:
-                    print(" - %s%s*.dll" % (prefix, x))
+                    print(f" - {prefix}{x}*.dll")
             add_data_files("", dll_files)
 
         #list of DLLs we want to include, without the "lib" prefix, or the version and extension
@@ -1493,11 +1513,11 @@ if WIN32:
             add_console_exe("xpra/platform/win32/pdfium.py",    "printer.ico",     "PDFIUM_Print")
             do_add_DLLs("", "pdfium")
         if nvenc_ENABLED:
-            add_console_exe("xpra/codecs/nv_util.py",                   "nvidia.ico",   "NVidia_info")
+            add_console_exe("xpra/codecs/nvidia/nv_util.py",                   "nvidia.ico",   "NVidia_info")
         if nvfbc_ENABLED:
-            add_console_exe("xpra/codecs/nvfbc/capture.py",             "nvidia.ico",   "NvFBC_capture")
+            add_console_exe("xpra/codecs/nvidia/nvfbc/capture.py",             "nvidia.ico",   "NvFBC_capture")
         if nvfbc_ENABLED or nvenc_ENABLED:
-            add_console_exe("xpra/codecs/cuda_common/cuda_context.py",  "cuda.ico",     "CUDA_info")
+            add_console_exe("xpra/codecs/nvidia/cuda_context.py",  "cuda.ico",     "CUDA_info")
 
     if ("install_exe" in sys.argv) or ("install" in sys.argv):
         #FIXME: how do we figure out what target directory to use?
@@ -1552,7 +1572,7 @@ if WIN32:
         #(further complicated by the fact that "." is the "frozen" path...)
         #but we re-add those two directories to the library.zip as part of the build script
         import OpenGL
-        print("*** copying PyOpenGL modules to %s ***" % install)
+        print(f"*** copying PyOpenGL modules to {install} ***")
         glmodules = {
             "OpenGL" : OpenGL,
             }
@@ -1560,7 +1580,7 @@ if WIN32:
             import OpenGL_accelerate        #@UnresolvedImport
         except ImportError as e:
             print("Warning: missing OpenGL_accelerate module")
-            print(" %s" % e)
+            print(f" {e}")
         else:
             glmodules["OpenGL_accelerate"] = OpenGL_accelerate
         for module_name, module in glmodules.items():
@@ -1574,7 +1594,7 @@ if WIN32:
                         "GLE", "GLES1", "GLES2", "GLES3",
                         )
                 )
-                print("copied %s to %s/%s" % (module_dir, install, module_name))
+                print(f"copied {module_dir} to {install}/{module_name}")
             except Exception as e:
                 if not isinstance(e, WindowsError) or ("already exists" not in str(e)): #@UndefinedVariable
                     raise
@@ -1618,10 +1638,10 @@ else:
         man_pages = ["fs/share/man/man1/xpra.1", "fs/share/man/man1/xpra_launcher.1"]
         if not OSX:
             man_pages.append("fs/share/man/man1/run_scaled.1")
-        add_data_files("%s/man1" % man_path,  man_pages)
+        add_data_files(f"{man_path}/man1",  man_pages)
         add_data_files("share/applications",  glob.glob("fs/share/applications/*.desktop"))
         add_data_files("share/mime/packages", ["fs/share/mime/packages/application-x-xpraconfig.xml"])
-        add_data_files("share/%s" % icons_dir, glob.glob("fs/share/icons/*.png"))
+        add_data_files(f"share/{icons_dir}", glob.glob("fs/share/icons/*.png"))
         add_data_files("share/metainfo",      ["fs/share/metainfo/xpra.appdata.xml"])
 
     #here, we override build and install so we can
@@ -1641,7 +1661,7 @@ else:
 
     class install_data_override(install_data):
         def run(self):
-            print("install_data_override: install_dir=%s" % self.install_dir)
+            print(f"install_data_override: install_dir={self.install_dir}")
             install_data.run(self)
 
             root_prefix = self.install_dir.rstrip("/")
@@ -1662,7 +1682,7 @@ else:
                 filename = os.path.basename(src)
                 dst_file = os.path.join(dst_dir, dst_name or filename)
                 #copy it
-                print("copying %s -> %s (%s)" % (src, dst_dir, oct(chmod)))
+                print(f"copying {src} -> {dst_dir} (%s)" % oct(chmod))
                 data = load_binary_file(src)
                 if subs:
                     for k,v in subs.items():
@@ -1857,7 +1877,8 @@ if WIN32 or OSX:
         external_includes += [
             "cffi", "_cffi_backend",
             "cryptography", "idna", "idna.idnadata", "appdirs",
-            "pkg_resources._vendor.packaging", "pkg_resources._vendor.packaging.requirements", "pkg_resources._vendor.pyparsing",
+            "pkg_resources._vendor.packaging", "pkg_resources._vendor.packaging.requirements",
+            "pkg_resources._vendor.pyparsing",
             ]
         add_modules("cryptography.hazmat.bindings._openssl",
                     "cryptography.hazmat.bindings._constant_time",
@@ -2023,17 +2044,16 @@ tace(proc_ENABLED, "xpra.platform.xposix.proc", "libprocps", extra_compile_args 
 
 #codecs:
 toggle_packages(enc_proxy_ENABLED, "xpra.codecs.enc_proxy")
-toggle_packages(nvfbc_ENABLED, "xpra.codecs.nvfbc")
+toggle_packages(nvfbc_ENABLED, "xpra.codecs.nvidia.nvfbc")
 if nvfbc_ENABLED:
     #platform: ie: `linux2` -> `linux`, `win32` -> `win`
     platform = sys.platform.rstrip("0123456789")
-    ace("xpra.codecs.nvfbc.fbc_capture_%s" % platform, "nvfbc", language="c++")
+    ace("xpra.codecs.nvidia.nvfbc.fbc_capture_%s" % platform, "nvfbc", language="c++")
 
-toggle_packages(nvenc_ENABLED, "xpra.codecs.nvenc")
-toggle_packages(nvenc_ENABLED or nvfbc_ENABLED, "xpra.codecs.cuda_common")
-toggle_packages(nvenc_ENABLED or nvfbc_ENABLED, "xpra.codecs.nv_util")
+nvidia_ENABLED = nvenc_ENABLED or nvfbc_ENABLED or nvjpeg_encoder_ENABLED or nvjpeg_decoder_ENABLED
+toggle_packages(nvidia_ENABLED, "xpra.codecs.nvidia")
 
-CUDA_BIN = "%s/cuda" % share_xpra
+CUDA_BIN = f"{share_xpra}/cuda"
 if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
     #find nvcc:
     from xpra.util import sorted_nicely
@@ -2072,11 +2092,11 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
         vpos = out.rfind(", V")
         if vpos>0:
             version = out[vpos+3:].split("\n")[0]
-            version_str = " version %s" % version
+            version_str = f" version {version}"
         else:
             version = "0"
             version_str = " unknown version!"
-        print("found CUDA compiler: %s%s" % (filename, version_str))
+        print(f"found CUDA compiler: {filename}{version_str}")
         return tuple(int(x) for x in version.split("."))
     for filename in options:
         vnum = get_nvcc_version(filename)
@@ -2086,7 +2106,7 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
         #choose the most recent one:
         nvcc_version, nvcc = list(reversed(sorted(nvcc_versions.items())))[0]
         if len(nvcc_versions)>1:
-            print(" using version %s from %s" % (nvcc_version, nvcc))
+            print(f" using version {nvcc_version} from {nvcc}")
     else:
         nvcc_version = nvcc = None
     if ((nvenc_ENABLED or nvjpeg_encoder_ENABLED) and cuda_kernels_ENABLED):
@@ -2103,8 +2123,8 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
             kernels += ["BGRX_to_RGB", "RGBX_to_RGB", "RGBA_to_RGBAP", "BGRA_to_RGBAP"]
         nvcc_commands = []
         for kernel in kernels:
-            cuda_src = "fs/share/xpra/cuda/%s.cu" % kernel
-            cuda_bin = "fs/share/xpra/cuda/%s.fatbin" % kernel
+            cuda_src = f"fs/share/xpra/cuda/{kernel}.cu"
+            cuda_bin = f"fs/share/xpra/cuda/{kernel}.fatbin"
             if os.path.exists(cuda_bin) and (cuda_rebuild_ENABLED is False):
                 continue
             reason = should_rebuild(cuda_src, cuda_bin)
@@ -2123,7 +2143,7 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
             #GCC 6 uses C++11 by default:
             else:
                 cmd.append("-std=c++11")
-            if gcc_version>=(12, 0):
+            if gcc_version>=(12, 0) or CC_is_clang():
                 cmd.append("--allow-unsupported-compiler")
             if nvcc_version>=(11, 5):
                 cmd += ["-arch=all",
@@ -2151,8 +2171,8 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
                 #if nvcc_version>=(11, 6):
                 #    comp_code_options.append((87, 87))
                 for arch, code in comp_code_options:
-                    cmd.append("-gencode=arch=compute_%s,code=sm_%s" % (arch, code))
-            print("CUDA compiling %s (%s)" % (kernel.ljust(16), reason))
+                    cmd.append(f"-gencode=arch=compute_{arch},code=sm_{code}")
+            print(f"CUDA compiling %s ({reason})" % kernel.ljust(16))
             print(" %s" % " ".join("'%s'" % x for x in cmd))
             nvcc_commands.append(cmd)
 
@@ -2162,8 +2182,8 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
             c, stdout, stderr = get_status_output(cmd)
             if c!=0:
                 nvcc_errors.append(c)
-                print("Error: failed to compile CUDA kernel %s" % kernel)
-                print(" using command: %s" % (cmd,))
+                print(f"Error: failed to compile CUDA kernel {kernel}")
+                print(f" using command: {cmd}")
                 print(stdout or "")
                 print(stderr or "")
         nvcc_threads = []
@@ -2180,7 +2200,7 @@ if (nvenc_ENABLED and cuda_kernels_ENABLED) or nvjpeg_encoder_ENABLED:
         add_data_files(CUDA_BIN, ["fs/share/xpra/cuda/%s.fatbin" % x for x in kernels])
 add_data_files(CUDA_BIN, ["fs/share/xpra/cuda/README.md"])
 
-tace(nvenc_ENABLED, "xpra.codecs.nvenc.encoder", "nvenc")
+tace(nvenc_ENABLED, "xpra.codecs.nvidia.nvenc.encoder", "nvenc")
 
 toggle_packages(argb_ENABLED, "xpra.codecs.argb")
 tace(argb_ENABLED, "xpra.codecs.argb.argb", optimize=3)
@@ -2189,10 +2209,10 @@ toggle_packages(evdi_ENABLED, "xpra.codecs.evdi")
 tace(evdi_ENABLED, "xpra.codecs.evdi.capture,xpra/codecs/evdi/evdi_compat.c", "evdi", language="c++")
 toggle_packages(drm_ENABLED, "xpra.codecs.drm")
 tace(drm_ENABLED, "xpra.codecs.drm.drm", "libdrm")
-toggle_packages(enc_x264_ENABLED, "xpra.codecs.enc_x264")
-tace(enc_x264_ENABLED, "xpra.codecs.enc_x264.encoder", "x264")
-toggle_packages(enc_x265_ENABLED, "xpra.codecs.enc_x265")
-tace(enc_x265_ENABLED, "xpra.codecs.enc_x265.encoder", "x265")
+toggle_packages(enc_x264_ENABLED, "xpra.codecs.x264")
+tace(enc_x264_ENABLED, "xpra.codecs.x264.encoder", "x264")
+toggle_packages(enc_x265_ENABLED, "xpra.codecs.x265")
+tace(enc_x265_ENABLED, "xpra.codecs.x265.encoder", "x265")
 toggle_packages(pillow_ENABLED, "xpra.codecs.pillow")
 toggle_packages(webp_ENABLED, "xpra.codecs.webp")
 tace(webp_ENABLED, "xpra.codecs.webp.encoder", "libwebp")
@@ -2200,10 +2220,10 @@ tace(webp_ENABLED, "xpra.codecs.webp.decoder", "libwebp")
 toggle_packages(spng_decoder_ENABLED or spng_encoder_ENABLED, "xpra.codecs.spng")
 tace(spng_decoder_ENABLED, "xpra.codecs.spng.decoder", "spng")
 tace(spng_decoder_ENABLED, "xpra.codecs.spng.encoder", "spng")
-toggle_packages(nvjpeg_encoder_ENABLED or nvjpeg_decoder_ENABLED, "xpra.codecs.nvjpeg")
-tace(nvjpeg_encoder_ENABLED or nvjpeg_decoder_ENABLED, "xpra.codecs.nvjpeg.common", "cuda,nvjpeg")
-tace(nvjpeg_encoder_ENABLED, "xpra.codecs.nvjpeg.encoder", "cuda,nvjpeg")
-tace(nvjpeg_decoder_ENABLED, "xpra.codecs.nvjpeg.decoder","cuda,nvjpeg")
+toggle_packages(nvjpeg_encoder_ENABLED or nvjpeg_decoder_ENABLED, "xpra.codecs.nvidia.nvjpeg")
+tace(nvjpeg_encoder_ENABLED or nvjpeg_decoder_ENABLED, "xpra.codecs.nvidia.nvjpeg.common", "cuda,nvjpeg")
+tace(nvjpeg_encoder_ENABLED, "xpra.codecs.nvidia.nvjpeg.encoder", "cuda,nvjpeg")
+tace(nvjpeg_decoder_ENABLED, "xpra.codecs.nvidia.nvjpeg.decoder","cuda,nvjpeg")
 toggle_packages(jpeg_decoder_ENABLED or jpeg_encoder_ENABLED, "xpra.codecs.jpeg")
 tace(jpeg_encoder_ENABLED, "xpra.codecs.jpeg.encoder", "libturbojpeg")
 tace(jpeg_decoder_ENABLED, "xpra.codecs.jpeg.decoder", "libturbojpeg")
@@ -2211,23 +2231,22 @@ toggle_packages(avif_ENABLED, "xpra.codecs.avif")
 tace(avif_ENABLED, "xpra.codecs.avif.encoder", "libavif")
 tace(avif_ENABLED, "xpra.codecs.avif.decoder", "libavif")
 #swscale and avcodec2 use libav_common/av_log:
-libav_common = dec_avcodec2_ENABLED or csc_swscale_ENABLED
-toggle_packages(libav_common, "xpra.codecs.libav_common")
-tace(libav_common, "xpra.codecs.libav_common.av_log", "libavutil")
-toggle_packages(dec_avcodec2_ENABLED, "xpra.codecs.dec_avcodec2")
-tace(dec_avcodec2_ENABLED, "xpra.codecs.dec_avcodec2.decoder,xpra/codecs/dec_avcodec2/register_compat.c", "libavcodec,libavutil,libavformat")
-toggle_packages(csc_libyuv_ENABLED, "xpra.codecs.csc_libyuv")
-tace(csc_libyuv_ENABLED, "xpra.codecs.csc_libyuv.colorspace_converter", "libyuv", language="c++",
+ffmpeg_ENABLED = dec_avcodec2_ENABLED or csc_swscale_ENABLED or enc_ffmpeg_ENABLED
+toggle_packages(ffmpeg_ENABLED, "xpra.codecs.ffmpeg")
+tace(ffmpeg_ENABLED, "xpra.codecs.ffmpeg.av_log", "libavutil")
+tace(dec_avcodec2_ENABLED, "xpra.codecs.ffmpeg.decoder,xpra/codecs/ffmpeg/register_compat.c", "libavcodec,libavutil,libavformat")
+tace(csc_swscale_ENABLED, "xpra.codecs.ffmpeg.colorspace_converter", "libswscale,libavutil")
+tace(enc_ffmpeg_ENABLED, "xpra.codecs.ffmpeg.encoder", "libavcodec,libavformat,libavutil", extra_compile_args="-Wno-deprecated-declarations")
+toggle_packages(csc_libyuv_ENABLED, "xpra.codecs.libyuv")
+tace(csc_libyuv_ENABLED, "xpra.codecs.libyuv.colorspace_converter", "libyuv", language="c++",
         extra_compile_args = ("-Wno-error=address", ) if WIN32 else ())
-toggle_packages(csc_swscale_ENABLED, "xpra.codecs.csc_swscale")
-tace(csc_swscale_ENABLED, "xpra.codecs.csc_swscale.colorspace_converter", "libswscale,libavutil")
 toggle_packages(csc_cython_ENABLED, "xpra.codecs.csc_cython")
 tace(csc_cython_ENABLED, "xpra.codecs.csc_cython.colorspace_converter", optimize=3)
 toggle_packages(vpx_ENABLED, "xpra.codecs.vpx")
 tace(vpx_ENABLED, "xpra.codecs.vpx.encoder", "vpx")
 tace(vpx_ENABLED, "xpra.codecs.vpx.decoder", "vpx")
-toggle_packages(enc_ffmpeg_ENABLED, "xpra.codecs.enc_ffmpeg")
-tace(enc_ffmpeg_ENABLED, "xpra.codecs.enc_ffmpeg.encoder", "libavcodec,libavformat,libavutil", extra_compile_args="-Wno-deprecated-declarations")
+toggle_packages(vpl_ENABLED, "xpra.codecs.vpl")
+tace(vpl_ENABLED, "xpra.codecs.vpl.encoder", "vpl")
 toggle_packages(v4l2_ENABLED, "xpra.codecs.v4l2")
 tace(v4l2_ENABLED, "xpra.codecs.v4l2.pusher")
 

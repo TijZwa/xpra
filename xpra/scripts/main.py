@@ -1906,13 +1906,20 @@ def run_remote_server(script_file, cmdline, error_cb, opts, args, mode, defaults
         setattr(opts, fn, v)
     if isdisplaytype(args, "ssh"):
         #add special flags to "display_as_args"
-        proxy_args = []
+        proxy_args = params.get("display_as_args", [])
         if params.get("display") is not None:
             geometry = params.get("geometry")
             display = params["display"]
+            try:
+                pos = proxy_args.index(display)
+            except ValueError:
+                pos = -1
             if mode=="shadow" and geometry:
                 display += f",{geometry}"
-            proxy_args.append(display)
+            if pos>=0:
+                proxy_args[pos] = display
+            else:
+                proxy_args.append(display)
         for x in get_start_server_args(opts, compat=True, cmdline=cmdline):
             proxy_args.append(x)
         #we have consumed the start[-child] options
@@ -2593,8 +2600,8 @@ def setup_proxy_ssh_socket(cmdline, auth_sock=os.environ.get("SSH_AUTH_SOCK")):
     from xpra.scripts.server import get_ssh_agent_path
     #ie: "/run/user/$UID/xpra/$DISPLAY/ssh/$UUID
     agent_uuid_sockpath = get_ssh_agent_path(agent_uuid)
-    if os.path.islink(agent_uuid_sockpath):
-        if is_socket(agent_uuid_sockpath):
+    if os.path.exists(agent_uuid_sockpath):
+        if os.path.islink(agent_uuid_sockpath) and is_socket(agent_uuid_sockpath):
             sshlog(f"setup_proxy_ssh_socket keeping existing valid socket {agent_uuid_sockpath!r}")
             #keep the existing socket unchanged - somehow it still works?
             return
@@ -2607,6 +2614,7 @@ def setup_proxy_ssh_socket(cmdline, auth_sock=os.environ.get("SSH_AUTH_SOCK")):
 def run_proxy(error_cb, opts, script_file, cmdline, args, mode, defaults):
     no_gtk()
     display = None
+    display_name = None
     server_mode = {
         "_proxy"                : "seamless",
         "_proxy_shadow_start"   : "shadow",
@@ -2618,7 +2626,6 @@ def run_proxy(error_cb, opts, script_file, cmdline, args, mode, defaults):
         if attach is not False:
             #maybe this server already exists?
             dotxpra = DotXpra(opts.socket_dir, opts.socket_dirs)
-            display_name = None
             if not args and server_mode in ("shadow", "expand"):
                 try:
                     display_name = pick_shadow_display(dotxpra, args)
@@ -2644,7 +2651,7 @@ def run_proxy(error_cb, opts, script_file, cmdline, args, mode, defaults):
                 v = strip_defaults_start_child(getattr(opts, fn), getattr(defaults, fn))
                 setattr(opts, fn, v)
             opts.splash = False
-            proc, socket_path, display = start_server_subprocess(script_file, args, server_mode, opts)
+            proc, socket_path, display_name = start_server_subprocess(script_file, args, server_mode, opts)
             if not socket_path:
                 #if we return non-zero, we will try the next run-xpra script in the list..
                 return 0
@@ -2662,7 +2669,7 @@ def run_proxy(error_cb, opts, script_file, cmdline, args, mode, defaults):
         #use display specified on command line:
         display = pick_display(error_cb, opts, args, cmdline)
     if display and server_mode!="shadow":
-        display_name = display.get("display_name")
+        display_name = display_name or display.get("display") or display.get("display_name")
         try:
             from xpra.scripts.server import get_session_dir
             with OSEnvContext():

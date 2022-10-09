@@ -8,7 +8,7 @@ from math import ceil
 
 from libc.stdint cimport uintptr_t
 from xpra.buffers.membuf cimport getbuf, MemBuf #pylint: disable=syntax-error
-from xpra.codecs.nvjpeg.nvjpeg cimport (
+from xpra.codecs.nvidia.nvjpeg.nvjpeg cimport (
     NV_ENC_INPUT_PTR, NV_ENC_OUTPUT_PTR, NV_ENC_REGISTERED_PTR,
     nvjpegStatus_t, nvjpegChromaSubsampling_t, nvjpegOutputFormat_t,
     nvjpegInputFormat_t, nvjpegBackend_t, nvjpegJpegEncoding_t,
@@ -17,13 +17,13 @@ from xpra.codecs.nvjpeg.nvjpeg cimport (
     NVJPEG_ENCODING_BASELINE_DCT, NVJPEG_CSS_GRAY, NVJPEG_INPUT_RGBI, NVJPEG_INPUT_RGB,
     NVJPEG_CSS_444, NVJPEG_CSS_422, NVJPEG_CSS_420,
     )
-from xpra.codecs.nvjpeg.common import (
+from xpra.codecs.nvidia.nvjpeg.common import (
     get_version,
     errcheck, NVJPEG_Exception,
     CSS_STR, ENCODING_STR, NVJPEG_INPUT_STR,
     )
 from xpra.codecs.codec_debug import may_save_image
-from xpra.codecs.cuda_common.cuda_context import get_CUDA_function, select_device, cuda_device_context
+from xpra.codecs.nvidia.cuda_context import get_CUDA_function, select_device, cuda_device_context
 from xpra.net.compression import Compressed
 from xpra.util import typedict
 

@@ -1,5 +1,5 @@
 # This file is part of Xpra.
-# Copyright (C) 2012-2021 Antoine Martin <antoine@xpra.org>
+# Copyright (C) 2012-2022 Antoine Martin <antoine@xpra.org>
 # Xpra is released under the terms of the GNU GPL v2, or, at your option, any
 # later version. See the file COPYING for details.
 
@@ -12,7 +12,7 @@ from xpra.log import Logger
 log = Logger("encoder", "vpx")
 
 from xpra.codecs.codec_constants import video_spec, get_subsampling_divs
-from xpra.os_util import WIN32, OSX, POSIX, BITS
+from xpra.os_util import WIN32, OSX, POSIX
 from xpra.util import AtomicInteger, envint, envbool, typedict
 
 from xpra.codecs.vpx.vpx cimport (
@@ -26,7 +26,7 @@ from xpra.codecs.vpx.vpx cimport (
     VPX_CS_BT_709, VPX_CR_FULL_RANGE,
     vpx_codec_err_to_string, vpx_codec_control_,
     )
-from libc.stdint cimport uint8_t
+from libc.stdint cimport uint8_t, int64_t
 from libc.stdlib cimport free, malloc
 from libc.string cimport memset
 
@@ -39,7 +39,6 @@ cdef int VPX_THREADS = envint("XPRA_VPX_THREADS", default_nthreads)
 cdef inline int roundup(int n, int m):
     return (n + m - 1) & ~(m - 1)
 
-cdef int ENABLE_VP9_YUV444 = envbool("XPRA_VP9_YUV444", True)
 cdef int ENABLE_VP9_TILING = envbool("XPRA_VP9_TILING", False)
 
 
@@ -51,9 +50,6 @@ cdef inline int MAX(int a, int b):
     if a>=b:
         return a
     return b
-
-
-from libc.stdint cimport int64_t
 
 
 DEF USAGE_STREAM_FROM_SERVER    = 0x0
@@ -185,19 +181,10 @@ COLORSPACES = {}
 
 CODECS = ("vp8", "vp9")
 COLORSPACES["vp8"] = ("YUV420P", )
-VP9_COLORSPACES = ["YUV420P", "YUV444P"]
-cdef int VP9_10BPP = envbool("XPRA_VP9_10BPP", VPX_ENCODER_ABI_VERSION>23 and not OSX)
-if VP9_10BPP:
-    VP9_COLORSPACES.append("YUV444P10")
-COLORSPACES["vp9"] = tuple(VP9_COLORSPACES)
+COLORSPACES["vp9"] = ("YUV420P", "YUV444P", "YUV444P10")
 
-VP9_RANGE = 3
-#as of 1.8:
-#VPX_ENCODER_ABI_VERSION=14+VPX_CODEC_ABI_VERSION
-#VPX_CODEC_ABI_VERSION=4+VPX_IMAGE_ABI_VERSION
-#VPX_IMAGE_ABI_VERSION=5
-if VPX_ENCODER_ABI_VERSION>=14+4+5:
-    VP9_RANGE = 4
+#as of libvpx 1.8:
+VP9_RANGE = 4
 
 
 def init_module():
@@ -287,11 +274,8 @@ def get_spec(encoding, colorspace):
         quality = 50
     else:
         has_lossless_mode = colorspace.startswith("YUV444P")
-        speed = 20
+        speed = 40
         quality = 50 + 50*int(has_lossless_mode)
-        if VPX_ENCODER_ABI_VERSION>=11:
-            #libvpx 1.5 made some significant performance improvements with vp9:
-            speed = 40
     return video_spec(encoding=encoding, input_colorspace=colorspace, output_colorspaces=[colorspace],
                       has_lossless_mode=has_lossless_mode,
                       codec_class=Encoder, codec_type=get_type(),
@@ -303,9 +287,9 @@ def get_spec(encoding, colorspace):
 cdef vpx_img_fmt_t get_vpx_colorspace(colorspace) except -1:
     if colorspace=="YUV420P":
         return VPX_IMG_FMT_I420
-    if colorspace=="YUV444P" and ENABLE_VP9_YUV444:
+    if colorspace=="YUV444P":
         return VPX_IMG_FMT_I444
-    if colorspace=="YUV444P10" and ENABLE_VP9_YUV444:
+    if colorspace=="YUV444P10":
         return VPX_IMG_FMT_I44416
     raise Exception("invalid colorspace %s" % colorspace)
 
@@ -345,12 +329,6 @@ cdef class Encoder:
         assert options.get("scaled-height", height)==height, "vpx encoder does not handle scaling"
         assert encoding in get_encodings()
         assert src_format in get_input_colorspaces(encoding)
-        if BITS==32 and WIN32:
-            dmaxw, dmaxh = MAX_SIZE[encoding]
-            if width>dmaxw or height>dmaxh:
-                #this can crash on win32, don't even try it
-                #(the unit tests would otherwise crash)
-                raise Exception("invalid dimensions %ix%i - maximum is %ix%i" % (width, height, dmaxw, dmaxh))
 
         self.src_format = src_format
 

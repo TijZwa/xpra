@@ -15,10 +15,11 @@ from threading import Lock
 from xpra.os_util import WIN32, LINUX, strtobytes
 from xpra.make_thread import start_thread
 from xpra.util import AtomicInteger, engs, csv, pver, envint, envbool, first_time, typedict
-from xpra.codecs.cuda_common.cuda_context import (
+from xpra.codecs.nvidia.cuda_context import (
     init_all_devices, get_devices, get_device_name,
     get_cuda_info, get_pycuda_info, reset_state,
     get_CUDA_function, record_device_failure, record_device_success, CUDA_ERRORS_INFO,
+    cuda_device_context, load_device,
     )
 from xpra.codecs.codec_constants import video_spec, TransientCodecException
 from xpra.codecs.image_wrapper import ImageWrapper
@@ -43,7 +44,6 @@ assert (x for x in TEST_ENCODINGS in ("h264", "h265")), "invalid list of encodin
 assert len(TEST_ENCODINGS)>0, "no encodings enabled!"
 DESIRED_PRESET = os.environ.get("XPRA_NVENC_PRESET", "")
 #NVENC requires compute capability value 0x30 or above:
-cdef int MIN_COMPUTE = 0x30
 
 cdef int SUPPORT_30BPP = envbool("XPRA_NVENC_SUPPORT_30BPP", True)
 cdef int YUV444_THRESHOLD = envint("XPRA_NVENC_YUV444_THRESHOLD", 85)
@@ -2958,8 +2958,6 @@ def init_module():
     if NVENCAPI_MAJOR_VERSION<0x7:
         raise Exception("unsupported version of NVENC: %#x" % NVENCAPI_VERSION)
     log("NVENC encoder API version %s", ".".join([str(x) for x in PRETTY_VERSION]))
-
-    from xpra.codecs.cuda_common.cuda_context import cuda_device_context, load_device
 
     cdef Encoder test_encoder
     #cdef uint32_t max_version

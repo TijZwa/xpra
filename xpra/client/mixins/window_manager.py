@@ -31,7 +31,7 @@ from xpra.os_util import (
     )
 from xpra.util import (
     envint, envbool, typedict,
-    make_instance, updict, repr_ellipsized, u, noerr,
+    make_instance, updict, repr_ellipsized, u, noerr, first_time,
     )
 from xpra.client.mixins.stub_client_mixin import StubClientMixin
 from xpra.log import Logger
@@ -243,15 +243,20 @@ class WindowClient(StubClientMixin):
                 icon_filename = get_icon_filename("xpra")
             traylog("window icon overlay: %s", icon_filename)
             if icon_filename:
+                # pylint: disable=import-outside-toplevel
+                #make sure Pillow's PNG image loader doesn't spam the output with debug messages:
+                import logging
+                logging.getLogger("PIL.PngImagePlugin").setLevel(logging.INFO)
                 try:
-                    #make sure Pillow's PNG image loader doesn't spam the output with debug messages:
-                    import logging
-                    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.INFO)
                     from PIL import Image   #@UnresolvedImport
-                    self.overlay_image = Image.open(icon_filename)
-                except Exception as e:
-                    log.error("Error: failed to load overlay icon '%s':", icon_filename, exc_info=True)
-                    log.error(" %s", e)
+                except ImportError:
+                    log.info("window icon overlay requires python-pillow")
+                else:
+                    try:
+                        self.overlay_image = Image.open(icon_filename)
+                    except Exception as e:
+                        log.error("Error: failed to load overlay icon '%s':", icon_filename, exc_info=True)
+                        log.error(" %s", e)
         traylog("overlay_image=%s", self.overlay_image)
         self._draw_queue = Queue()
 
@@ -678,8 +683,14 @@ class WindowClient(StubClientMixin):
     def _window_icon_image(self, wid, width, height, coding, data):
         #convert the data into a pillow image,
         #adding the icon overlay (if enabled)
-        from PIL import Image  # @UnresolvedImport
         coding = bytestostr(coding)
+        try:
+            # pylint: disable=import-outside-toplevel
+            from PIL import Image
+        except ImportError:
+            if first_time("window-icons-require-pillow"):
+                log.info("showing window icons requires python-pillow")
+            return None
         iconlog("%s.update_icon(%s, %s, %s, %s bytes) ICON_SHRINKAGE=%s, ICON_OVERLAY=%s",
                 self, width, height, coding, len(data), ICON_SHRINKAGE, ICON_OVERLAY)
         if coding=="default":
@@ -693,6 +704,7 @@ class WindowClient(StubClientMixin):
             img = Image.frombytes("RGBA", (width,height), memoryview_to_bytes(data), "raw", "BGRA", rowstride, 1)
             has_alpha = True
         else:
+            # pylint: disable=import-outside-toplevel
             from xpra.codecs.pillow.decoder import open_only
             img = open_only(data, ("png", ))
             if img.mode not in ("RGB", "RGBA"):

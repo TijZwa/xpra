@@ -17,8 +17,8 @@ from xpra.os_util import bytestostr
 from xpra.util import csv
 from xpra.codecs.codec_constants import get_subsampling_divs
 from xpra.codecs.image_wrapper import ImageWrapper
-from xpra.codecs.libav_common.av_log cimport override_logger, restore_logger, av_error_str #@UnresolvedImport pylint: disable=syntax-error
-from xpra.codecs.libav_common.av_log import SilenceAVWarningsContext
+from xpra.codecs.ffmpeg.av_log cimport override_logger, restore_logger, av_error_str #@UnresolvedImport pylint: disable=syntax-error
+from xpra.codecs.ffmpeg.av_log import SilenceAVWarningsContext
 from xpra.buffers.membuf cimport memalign, buffer_context
 
 from libc.stdint cimport uintptr_t, uint8_t
@@ -553,8 +553,8 @@ def get_version():
     return (LIBAVCODEC_VERSION_MAJOR, LIBAVCODEC_VERSION_MINOR, LIBAVCODEC_VERSION_MICRO)
 
 v = get_version()
-if v<(3,):
-    raise ImportError("ffmpeg version %s is too old" % v)
+if v<(4, 2):
+    raise ImportError(f"ffmpeg version {v} is too old")
 
 register_all()
 CODECS = []

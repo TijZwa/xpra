@@ -467,10 +467,9 @@ def parse_display_name(error_cb, opts, display_name, cmdline=(), find_session_by
         opts.display = desc.get("display")
 
     if protocol in ("ssh", "vnc+ssh"):
-        proxy_command = ["_proxy"]
         desc.update({
                 "type"             : protocol,
-                "proxy_command"    : proxy_command,
+                "proxy_command"    : ["_proxy"],
                 "exit_ssh"         : opts.exit_ssh,
                 "display"          : None,
                 "display_as_args"  : [],
@@ -504,11 +503,12 @@ def parse_display_name(error_cb, opts, display_name, cmdline=(), find_session_by
         if is_paramiko:
             ssh[0] = "paramiko"
             desc["is_paramiko"] = is_paramiko
+            paramiko_config = {}
             if opts.ssh.find(":")>0:
                 paramiko_config = parse_simple_dict(opts.ssh.split(":", 1)[1])
                 desc["paramiko-config"] = paramiko_config
-                agent_forwarding |= paramiko_config.get("agent", "").lower() in TRUE_OPTIONS
-                paramiko_config["agent"] = str(agent_forwarding)
+            agent_forwarding |= paramiko_config.get("agent", "yes").lower() in TRUE_OPTIONS
+            paramiko_config["agent"] = str(agent_forwarding)
         elif is_putty:
             desc["is_putty"] = True
         desc["agent"] = agent_forwarding
@@ -517,7 +517,7 @@ def parse_display_name(error_cb, opts, display_name, cmdline=(), find_session_by
             #so it can setup the ssh agent symlink at a location
             #that the server can find with just the uuid:
             uuid = get_user_uuid()
-            proxy_command.append(f"--env=SSH_AGENT_UUID={uuid}")
+            desc["display_as_args"].append(f"--env=SSH_AGENT_UUID={uuid}")
             desc["ssh-agent-uuid"] = uuid
 
         _parse_host_string(host, 22)
@@ -1616,31 +1616,31 @@ When unspecified, all the available codecs are allowed and the first one is used
                       +" (default: %s)" % dcsv(defaults.auth))
     group.add_option("--tcp-auth", action="append",
                       dest="tcp_auth", default=list(defaults.tcp_auth or []),
-                      help="The authentication module to use for TCP sockets"
+                      help="The authentication module to use for TCP sockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.tcp_auth))
     group.add_option("--ws-auth", action="append",
                       dest="ws_auth", default=list(defaults.ws_auth or []),
-                      help="The authentication module to use for Websockets"
+                      help="The authentication module to use for Websockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.ws_auth))
     group.add_option("--wss-auth", action="append",
                       dest="wss_auth", default=list(defaults.wss_auth or []),
-                      help="The authentication module to use for Secure Websockets"
+                      help="The authentication module to use for Secure Websockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.wss_auth))
     group.add_option("--ssl-auth", action="append",
                       dest="ssl_auth", default=list(defaults.ssl_auth or []),
-                      help="The authentication module to use for SSL sockets"
+                      help="The authentication module to use for SSL sockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.ssl_auth))
     group.add_option("--ssh-auth", action="append",
                       dest="ssh_auth", default=list(defaults.ssh_auth or []),
-                      help="The authentication module to use for SSH sockets"
+                      help="The authentication module to use for SSH sockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.ssh_auth))
     group.add_option("--rfb-auth", action="append",
                       dest="rfb_auth", default=list(defaults.rfb_auth or []),
-                      help="The authentication module to use for RFB sockets"
+                      help="The authentication module to use for RFB sockets - deprecated, use per socket syntax"
                       +" (default: %s)" % dcsv(defaults.rfb_auth))
     group.add_option("--vsock-auth", action="append",
                      dest="vsock_auth", default=list(defaults.vsock_auth or []),
-                     help="The authentication module to use for vsock sockets"
+                     help="The authentication module to use for vsock sockets - deprecated, use per socket syntax"
                      +" (default: '%s')" % dcsv(defaults.vsock_auth))
     group.add_option("--min-port", action="store",
                       dest="min_port", default=defaults.min_port,

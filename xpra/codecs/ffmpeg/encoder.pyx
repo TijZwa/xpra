@@ -13,8 +13,8 @@ from xpra.log import Logger
 log = Logger("encoder", "ffmpeg")
 
 from xpra.codecs.codec_constants import video_spec
-from xpra.codecs.libav_common.av_log cimport override_logger, restore_logger, av_error_str #@UnresolvedImport pylint: disable=syntax-error
-from xpra.codecs.libav_common.av_log import SilenceAVWarningsContext  # @UnresolvedImport
+from xpra.codecs.ffmpeg.av_log cimport override_logger, restore_logger, av_error_str #@UnresolvedImport pylint: disable=syntax-error
+from xpra.codecs.ffmpeg.av_log import SilenceAVWarningsContext  # @UnresolvedImport
 from xpra.util import AtomicInteger, csv, print_nested_dict, reverse_dict, envint, envbool, typedict
 from xpra.os_util import bytestostr, strtobytes, LINUX
 from xpra.buffers.membuf cimport memalign
