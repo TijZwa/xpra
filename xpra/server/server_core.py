@@ -17,6 +17,7 @@ from urllib.parse import urlparse, parse_qsl, unquote
 from weakref import WeakKeyDictionary
 from time import sleep, time, monotonic
 from threading import Thread, Lock
+from xpra.net.quic.common import QuicCommon
 
 from xpra.version_util import (
     XPRA_VERSION, vparts, version_str, full_version_str, version_compat_check, get_version_info_full,
@@ -673,7 +674,17 @@ class ServerCore:
                     else:
                         self._http_scripts[script] = handler
         httplog("http_scripts(%s)=%s", opts.http_scripts, self._http_scripts)
+        # --------------------- QUIC TEST ---------------------
+        qthread = Thread(target = self.run_quic_server)
+        qthread.daemon = True
+        qthread.start()
 
+    def run_quic_server(self):
+        netlog.info("Start of quic thread")
+        quicServer = QuicCommon()
+        quicServer.start()
+        netlog.info("End of quic thread")
+    # --------------------- END QUIC TEST ---------------------
 
     ######################################################################
     # authentication:
